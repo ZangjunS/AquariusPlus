@@ -1,3 +1,3 @@
 ﻿# AquariusPlus
 
-Repository for the dsh-superagent workflow.
+Test repository for the dsh-superagent workflow.
