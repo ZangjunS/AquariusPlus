@@ -111,18 +111,28 @@ fi
 BACKEND="$SRC/springainativecode"
 INFRA="$SRC/infra/k8s"
 
-echo "===================== 2. Maven 打包（依赖自动下载到 /root/.m2） ====================="
+echo "===================== 2. Maven 打包（只打勾选的模块，-pl -am） ====================="
 # 只有勾了后端模块才需要 Maven；只勾 ds-web（纯静态页）可以整段跳过
 BE_SELECTED=$(echo "$BUILD_MODULES" | tr ' ' '\n' | grep -E '^ds-(auth|user|product|gateway)$' || true)
 if [ "$SKIP_BUILD" != "true" ] && [ -n "$BE_SELECTED" ]; then
   echo "本地 m2 缓存：$(du -sh /root/.m2/repository 2>/dev/null | cut -f1 || echo 0)"
+  # 只构建勾选的模块；-am 会把它们依赖的 ds-common / ds-api 一并打出来（这是必需的，
+  # 因为 jar 里要用到这两个模块的类），未勾选的业务模块（ds-auth/ds-user/...）不会再进 reactor。
+  PL=""
+  for m in $BE_SELECTED; do PL="$PL,:$m"; done
+  PL=${PL#,}
+  echo "Maven -pl $PL -am"
   docker run --rm \
     -v "$M2_REPO:/root/.m2/repository" \
     -v "$BACKEND:/src" \
     -w /src/backend \
     maven:3.9-eclipse-temurin-17 \
-    mvn -B -s .mvn/settings.xml -Dmaven.repo.local=/root/.m2/repository -DskipTests clean package
-  ls -lh "$BACKEND"/backend/*/target/*.jar 2>/dev/null || echo "(jar 列表读取失败，看上面 Maven 输出)"
+    mvn -B -s .mvn/settings.xml -Dmaven.repo.local=/root/.m2/repository -DskipTests \
+      -pl "$PL" -am clean package
+  echo "本次产出的 jar："
+  for m in $BE_SELECTED; do
+    ls -lh "$BACKEND"/backend/$m/target/*.jar 2>/dev/null || echo "  $m：未产出 jar（看上面 Maven 输出）"
+  done
 
   echo "===================== 3. 构建镜像（只构建勾选的模块） ====================="
   cd "$BACKEND"
