@@ -11,18 +11,19 @@ kubectl apply -f postgres.yaml
 kubectl apply -f redis.yaml
 kubectl apply -f rabbitmq.yaml
 kubectl apply -f nacos.yaml
+kubectl apply -f pgadmin.yaml
 
 echo "==> 业务服务 + 前端"
 kubectl apply -f services.yaml
 kubectl apply -f web.yaml
 
-echo "==> 端口开放（Jenkins/Nacos/RabbitMQ/Redis/Postgres → NodePort）"
+echo "==> 端口开放（Jenkins/Nacos/RabbitMQ/Redis/Postgres/pgAdmin → NodePort）"
 kubectl apply -f expose.yaml
 kubectl -n "$NS" get svc | grep -- '-ext' || true
 bash ../scripts/port-bridge.sh || echo "端口桥接失败（集群内访问不受影响）"
 
 echo "==> 等待就绪"
-for svc in postgres redis rabbitmq nacos ds-auth ds-user ds-product ds-gateway ds-web; do
+for svc in postgres redis rabbitmq nacos pgadmin ds-auth ds-user ds-product ds-gateway ds-web; do
   kubectl -n "$NS" rollout status deploy/$svc --timeout=300s
 done
 

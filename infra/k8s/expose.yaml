@@ -87,6 +87,25 @@ spec:
       targetPort: 9848
       nodePort: 30849
 ---
+# pgAdmin：Postgres 图形化客户端，浏览器打开 http://127.0.0.1:30083（admin@ds.com / admin123）
+apiVersion: v1
+kind: Service
+metadata:
+  name: pgadmin-ext
+  namespace: ds
+  labels:
+    app: pgadmin
+    expose: nodeport
+spec:
+  type: NodePort
+  selector:
+    app: pgadmin
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      nodePort: 30083
+---
 # Jenkins：Docker 容器 ds-jenkins，宿主端口 8090。Service 无 selector，endpoints 手工指向宿主网关
 apiVersion: v1
 kind: Service

@@ -2,7 +2,7 @@
 # 用途：本地验证 DS 微服务
 #   30080 网关 / 30081 前端 / 30082 Dashboard
 #   30432 Postgres / 30679 Redis / 30672 RabbitMQ(AMQP) / 30972 RabbitMQ(管理台)
-#   30848 Nacos(HTTP) / 30849 Nacos(gRPC 9848) / 30990 Jenkins
+#   30848 Nacos(HTTP) / 30849 Nacos(gRPC 9848) / 30990 Jenkins / 30083 pgAdmin
 # 注意：NodePort 只有在建集群时就做 extraPortMappings 才能从宿主机（WSL/Windows）访问；
 #       集群已存在时新增端口只能重建集群，或用 docker 端口桥接（见 DEPLOY-SPEC.md）
 kind: Cluster
@@ -40,4 +40,7 @@ nodes:
         protocol: TCP
       - containerPort: 30990
         hostPort: 30990
+        protocol: TCP
+      - containerPort: 30083
+        hostPort: 30083
         protocol: TCP

@@ -2,13 +2,13 @@
 # DS 环境「一键从零搭建」脚本（WSL2 内执行，普通用户 zs 即可，不要 sudo）
 #
 # 做什么：
-#   1. 按 kind-ds.yaml 建 kind 集群（含 10 条 extraPortMappings，宿主机可直接访问 NodePort）
+#   1. 按 kind-ds.yaml 建 kind 集群（含 11 条 extraPortMappings，宿主机可直接访问 NodePort）
 #   2. 起私有镜像仓库 registry:2，并让集群节点信任这个 http 仓库
-#   3. 部署 Postgres / Redis / RabbitMQ / Nacos（含初始化 SQL 与 Nacos 配置）
+#   3. 部署 Postgres / Redis / RabbitMQ / Nacos / pgAdmin（含初始化 SQL 与 Nacos 配置）
 #   4. 部署 4 个后端服务 + 前端，并开放基础设施端口（expose.yaml）
 #   5. 起端口桥接容器（kind 集群已存在、端口没写进 extraPortMappings 时的兜底）
 #
-# 前置：docker、kind、kubectl 已装；Windows 侧端口 30080/30081/30082/30432/30672/30679/30848/30849/30972/30990 未被占用。
+# 前置：docker、kind、kubectl 已装；Windows 侧端口 30080/30081/30082/30083/30432/30672/30679/30848/30849/30972/30990 未被占用。
 #
 # 用法：
 #   bash setup-kind.sh              # 全套
@@ -74,10 +74,10 @@ echo "节点 containerd 已信任 http 仓库"
 
 echo "==================== 3. 基础设施 ===================="
 kubectl create namespace "$NS" --dry-run=client -o yaml | kubectl apply -f -
-for f in postgres.yaml redis.yaml rabbitmq.yaml nacos.yaml; do
+for f in postgres.yaml redis.yaml rabbitmq.yaml nacos.yaml pgadmin.yaml; do
   kubectl apply -f "$HERE/$f"
 done
-for d in postgres redis rabbitmq nacos; do
+for d in postgres redis rabbitmq nacos pgadmin; do
   kubectl -n "$NS" rollout status deploy/$d --timeout=300s
 done
 
@@ -112,5 +112,6 @@ echo "  仓库      http://127.0.0.1:${REG_PORT}  / 节点侧 ${NODE_GW}:${REG_P
 echo "  Nacos     http://127.0.0.1:30848/nacos"
 echo "  RabbitMQ  http://127.0.0.1:30972  (ds / ds123456)"
 echo "  Postgres  127.0.0.1:30432  (ds / ds123456, 库 ds)"
+echo "  pgAdmin   http://127.0.0.1:30083  (admin@ds.com / admin123)"
 echo "  Redis     127.0.0.1:30679"
 echo "  下一步：起 Jenkins 容器并跑 ds-cicd 任务（见 DEPLOY-SPEC.md 第 6 章）"

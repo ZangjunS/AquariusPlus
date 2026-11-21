@@ -23,7 +23,7 @@ ds/
       Dockerfile                # 前端 Nginx 镜像
   infra/                        # 外部环境与 CI/CD
     k8s/                        # K8s 清单（Kind 验证）
-      namespace.yaml / postgres / redis / rabbitmq / nacos / harbor
+      namespace.yaml / postgres / redis / rabbitmq / nacos / pgadmin / harbor
       services.yaml            # 4 个业务服务（NodePort 30080 网关）
       web.yaml                 # 前端 Nginx（NodePort 30081）
       setup-kind.sh            # 一键建 kind + 起 Harbor + 部署
@@ -75,6 +75,7 @@ cd infra\k8s
 # 访问
 #   前端  http://127.0.0.1:30081
 #   网关  http://127.0.0.1:30080
+#   pgAdmin http://127.0.0.1:30083  (admin@ds.com / admin123)
 #   Harbor http://127.0.0.1:30082  (admin / Harbor12345)
 ```
 
@@ -106,6 +107,7 @@ docker compose up -d jenkins
 | Postgres | 5432 | — |
 | Redis | 6379 | — |
 | RabbitMQ | 5672 / 15672 | — |
+| pgAdmin | — | 30083 |
 | Harbor | 30082 | 30082 |
 | Jenkins | 8090 | — |
 

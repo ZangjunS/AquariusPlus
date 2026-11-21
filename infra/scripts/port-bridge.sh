@@ -16,7 +16,7 @@ set -euo pipefail
 
 NAME=ds-portbridge
 NODE_CONTAINER=${NODE_CONTAINER:-ds-kind-control-plane}
-PORTS=${PORTS:-"30432 30679 30672 30972 30848 30849 30990"}
+PORTS=${PORTS:-"30432 30679 30672 30972 30848 30849 30990 30083"}
 IMAGE=${IMAGE:-alpine/socat}
 
 if [ "${1:-}" = "--remove" ]; then
@@ -29,17 +29,18 @@ NODE_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{
 [ -n "$NODE_IP" ] || { echo "找不到节点容器 $NODE_CONTAINER，集群没起来？"; exit 1; }
 echo "节点容器 $NODE_CONTAINER IP = $NODE_IP"
 
-# 已经存在且节点 IP 没变、且接在 kind 网络 -> 直接复用
+# 已经存在且节点 IP 没变、端口列表没变、且接在 kind 网络 -> 直接复用
 if docker inspect "$NAME" >/dev/null 2>&1; then
   CUR_IP=$(docker inspect -f '{{index .Config.Labels "ds.node.ip"}}' "$NAME" 2>/dev/null || true)
+  CUR_PORTS=$(docker inspect -f '{{index .Config.Labels "ds.ports"}}' "$NAME" 2>/dev/null || true)
   CUR_NET=$(docker inspect -f '{{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{end}}' "$NAME" 2>/dev/null || true)
   RUNNING=$(docker inspect -f '{{.State.Running}}' "$NAME" 2>/dev/null || echo false)
-  if [ "$CUR_IP" = "$NODE_IP" ] && [ "$RUNNING" = "true" ] && echo "$CUR_NET" | grep -q kind; then
-    echo "$NAME 已存在且指向 $NODE_IP，复用"
+  if [ "$CUR_IP" = "$NODE_IP" ] && [ "$CUR_PORTS" = "$PORTS" ] && [ "$RUNNING" = "true" ] && echo "$CUR_NET" | grep -q kind; then
+    echo "$NAME 已存在且指向 $NODE_IP，端口列表未变，复用"
     docker ps --filter name="$NAME" --format '{{.Names}} {{.Status}}'
     exit 0
   fi
-  echo "配置已变化（ip=$CUR_IP net=$CUR_NET running=$RUNNING），重建"
+  echo "配置已变化（ip=$CUR_IP ports=[$CUR_PORTS] net=$CUR_NET running=$RUNNING），重建"
   docker rm -f "$NAME" >/dev/null 2>&1 || true
 fi
 
@@ -53,6 +54,7 @@ CMD="$CMD wait"
 
 docker run -d --name "$NAME" --restart unless-stopped --network kind \
   --label "ds.node.ip=$NODE_IP" \
+  --label "ds.ports=$PORTS" \
   $ARGS --entrypoint sh "$IMAGE" -c "$CMD" >/dev/null
 
 sleep 2
