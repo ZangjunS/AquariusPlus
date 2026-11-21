@@ -28,15 +28,33 @@
             <artifactId>spring-boot-starter-validation</artifactId>
             <scope>provided</scope>
         </dependency>
+        <!-- 不能用 provided：ds-common 里的 RedisTemplate/Redis 配置是运行时真正要用的，
+             provided 不会传递给业务模块，导致 redisson 在、spring-data-redis 不在，
+             运行时报 NoClassDefFoundError: org/springframework/data/redis/connection/zset/Tuple -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-data-redis</artifactId>
-            <scope>provided</scope>
         </dependency>
 
+        <!-- redisson 的 spring-data 适配层必须和当前 Spring Data Redis 版本匹配：
+             本项目是 Boot 2.7 / spring-data-redis 2.7，而 starter 默认带的是适配 3.1 的
+             redisson-spring-data-31，它会引用 3.x 才有的 org.springframework.data.redis.connection.zset.Tuple，
+             运行时报 NoClassDefFoundError / ExceptionInInitializerError，所有 Redis 操作全挂。
+             这里排除 31，显式换成 27（对应 spring-data-redis 2.7）。 -->
         <dependency>
             <groupId>org.redisson</groupId>
             <artifactId>redisson-spring-boot-starter</artifactId>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.redisson</groupId>
+                    <artifactId>redisson-spring-data-31</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>org.redisson</groupId>
+            <artifactId>redisson-spring-data-27</artifactId>
+            <version>${redisson.version}</version>
         </dependency>
 
         <dependency>

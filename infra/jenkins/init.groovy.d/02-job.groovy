@@ -18,10 +18,11 @@ try {
 }
 
 def jobName = 'ds-cicd'
-def shell = 'bash /src/infra/jenkins/ci.sh'
+// 入口用 bootstrap：先从 GitHub 拉代码，再执行仓库里的 ci.sh
+def shell = 'bash /src/infra/jenkins/bootstrap.sh'
 
 def configure = { FreeStyleProject job ->
-    job.description = 'DS 微服务：Maven 构建 → 推送私有仓库 → K8s 滚动发布 → 访问验证'
+    job.description = 'DS 微服务：GitHub 拉取 → Maven 构建 → 推送私有仓库 → K8s 滚动发布 → 访问验证'
     job.setConcurrentBuild(false)
     job.buildersList.clear()
     job.buildersList.add(new Shell(shell))

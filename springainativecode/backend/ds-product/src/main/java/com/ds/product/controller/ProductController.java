@@ -1,6 +1,7 @@
 package com.ds.product.controller;
 
 import com.ds.api.entity.Product;
+import com.ds.common.exception.BusinessException;
 import com.ds.common.model.Result;
 import com.ds.product.service.ProductService;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -74,6 +75,11 @@ public class ProductController {
 
     @SuppressWarnings("unused")
     private Result<Product> fallbackById(Long id, Throwable t) {
+        // 业务异常（如商品不存在）不是「服务故障」，原样抛出交给全局异常处理器，
+        // 否则会被降级成 503「商品服务降级中」，从而掩盖真实的 404。
+        if (t instanceof BusinessException) {
+            throw (BusinessException) t;
+        }
         log.warn("[circuit] byId fallback: {}", t.getMessage());
         return Result.fail(503, "商品服务降级中");
     }

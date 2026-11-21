@@ -15,7 +15,7 @@ pipeline {
     environment {
         REGISTRY_PUSH = '127.0.0.1:5000'          // 宿主侧地址（docker push 走宿主 daemon）
         REGISTRY_PULL = '172.17.1.1:5000'          // kind 节点侧地址（kubelet 拉镜像用）
-        REPO          = '/mnt/d/000/dev/code/item/zangs/springclould/ds/springainativecode'
+        REPO          = '/mnt/d/000/dev/code/item/zangs/springclould/AquariusPlus/springainativecode'
         M2            = '/mnt/d/dev/envi/maven/.m2/repository'
         K8S_NS        = 'ds'
     }

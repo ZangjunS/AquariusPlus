@@ -8,9 +8,9 @@
 #   5. /tmp 不是宿主 /tmp → 构建工作目录用宿主共享的原生盘目录 /home/zs/ds-ci
 set -e
 
-REPO_D=/mnt/d/000/dev/code/item/zangs/springclould/ds
+REPO_D=/mnt/d/000/dev/code/item/zangs/springclould/AquariusPlus
 REPO_SRC=$REPO_D/springainativecode
-M2=/mnt/c/Users/zangs/.m2
+M2=/mnt/d/dev/envi/maven/.m2/repository
 INIT_DIR=$REPO_D/infra/jenkins/init.groovy.d
 mkdir -p /home/zs/ds-ci
 

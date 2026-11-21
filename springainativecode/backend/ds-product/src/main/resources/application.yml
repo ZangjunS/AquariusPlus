@@ -16,6 +16,14 @@ spring:
         namespace: dev
         file-extension: yml
 
+  # 毒消息兜底：反序列化失败的消息直接丢弃，不再无限重投（否则会刷满日志并拖垮服务）
+  rabbitmq:
+    listener:
+      simple:
+        default-requeue-rejected: false
+        retry:
+          enabled: false
+
 mybatis-plus:
   configuration:
     map-underscore-to-camel-case: true

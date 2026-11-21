@@ -47,7 +47,7 @@ spring:
 
       httpclient:
         connect-timeout: 3000
-        response-timeout: 10s
+        response-timeout: 30s   # 默认 10s 太紧：Pod 刚启动的第一个请求经常 >1s
 
 resilience4j:
   ratelimiter:
@@ -56,6 +56,21 @@ resilience4j:
         limitForPeriod: 100
         limitRefreshPeriod: 1s
         timeoutDuration: 0
+  # 关键：网关 CircuitBreaker 默认 TimeLimiter 只有 1 秒，
+  # 下游冷启动（首个请求 1~3s）会被当成超时 → 直接走 fallback，
+  # 结果就是“接口返回 405/503，但数据已经写进库”。这里放宽到 10s。
+  timelimiter:
+    instances:
+      productBreaker:
+        timeoutDuration: 10s
+        cancelRunningFuture: true
+  circuitbreaker:
+    instances:
+      productBreaker:
+        slidingWindowSize: 20
+        minimumNumberOfCalls: 10
+        failureRateThreshold: 50
+        waitDurationInOpenState: 10s
 
 knife4j:
   gateway:
