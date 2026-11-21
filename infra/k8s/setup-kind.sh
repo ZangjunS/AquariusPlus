@@ -91,6 +91,19 @@ if [ "$INFRA_ONLY" = false ]; then
   bash "$HERE/../scripts/port-bridge.sh" || echo "端口桥接失败（集群内访问不受影响）"
 fi
 
+# Nacos 命名空间 dev：服务注册时带 namespaceId=dev，但命名空间记录必须显式创建，
+# 否则控制台命名空间下拉框里没有 dev（服务其实是正常注册的）。创建后由 PVC 持久化。
+if [ "$INFRA_ONLY" = false ]; then
+  for i in $(seq 1 12); do
+    code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:30848/nacos/v1/ns/service/list?namespaceId=dev" 2>/dev/null || true)
+    [ "$code" = "200" ] && break
+    sleep 5
+  done
+  curl -s -X POST "http://127.0.0.1:30848/nacos/v1/console/namespaces" \
+    -d "customNamespaceId=dev&namespaceName=dev&namespaceDesc=dev%20env&namespaceType=0" >/dev/null 2>&1 || true
+  echo "Nacos 命名空间 dev 已就绪（已存在则为幂等）"
+fi
+
 echo ""
 echo "==================== 完成 ===================="
 echo "  前端页面  http://127.0.0.1:30081  (demo / 123456)"
