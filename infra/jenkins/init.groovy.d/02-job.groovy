@@ -27,10 +27,35 @@ def configure = { FreeStyleProject job ->
     job.buildersList.clear()
     job.buildersList.add(new Shell(shell))
     job.removeProperty(ParametersDefinitionProperty)
-    job.addProperty(new ParametersDefinitionProperty(
-        new StringParameterDefinition('TAG', '', '镜像 tag；留空自动用 build-<构建号>'),
-        new BooleanParameterDefinition('SKIP_BUILD', false, '跳过 Maven/镜像构建/推送，直接用已有 TAG 发布')
-    ))
+
+    def mods = [
+        'ds-auth'   : 'BUILD_AUTH',
+        'ds-user'   : 'BUILD_USER',
+        'ds-product': 'BUILD_PRODUCT',
+        'ds-gateway': 'BUILD_GATEWAY',
+        'ds-web'    : 'BUILD_WEB'
+    ]
+    def restarts = [
+        'ds-auth'   : 'RS_AUTH',
+        'ds-user'   : 'RS_USER',
+        'ds-product': 'RS_PRODUCT',
+        'ds-gateway': 'RS_GATEWAY',
+        'ds-web'    : 'RS_WEB'
+    ]
+
+    def params = []
+    params << new StringParameterDefinition('TAG', '', '镜像 tag；留空自动用 build-<构建号>')
+    params << new BooleanParameterDefinition('SKIP_BUILD', false, '跳过 Maven/镜像构建/推送，直接用已有 TAG 发布')
+    params << new BooleanParameterDefinition('BUILD_ALL', false, '【一键全选】勾上=构建全部 5 个模块（优先级高于下面单独勾选）')
+    mods.each { name, var ->
+        params << new BooleanParameterDefinition(var, false, "构建 ${name}（默认不勾）")
+    }
+    params << new BooleanParameterDefinition('RS_NONE', false, '【一键取消】勾上=构建完成后不重启任何服务（优先级高于下面单独勾选）')
+    restarts.each { name, var ->
+        params << new BooleanParameterDefinition(var, true, "构建完成后自动重启 ${name}（默认勾选）")
+    }
+
+    job.addProperty(new ParametersDefinitionProperty(params.toArray(new hudson.model.ParameterDefinition[0])))
     job.save()
 }
 
@@ -38,8 +63,8 @@ def existing = j.getItem(jobName)
 if (existing == null) {
     def job = j.createProject(FreeStyleProject, jobName)
     configure(job)
-    println "[init] 已创建任务 ${jobName}（参数 TAG / SKIP_BUILD）"
+    println "[init] 已创建任务 ${jobName}（TAG / SKIP_BUILD / BUILD_* 勾选 / RS_* 重启）"
 } else {
     configure(existing)
-    println "[init] 已刷新任务 ${jobName}（参数 TAG / SKIP_BUILD）"
+    println "[init] 已刷新任务 ${jobName}（TAG / SKIP_BUILD / BUILD_* 勾选 / RS_* 重启）"
 }

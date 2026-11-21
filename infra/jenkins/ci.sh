@@ -22,6 +22,38 @@ NS=ds
 TAG="${TAG:-build-${BUILD_NUMBER:-manual}}"
 SKIP_BUILD="${SKIP_BUILD:-false}"
 
+# ========= 模块选择（Jenkins 勾选项 → 实际清单） =========
+# 构建哪些（默认全不选；BUILD_ALL=true 等于全选）
+if [ -n "${BUILD_ALL+x}${BUILD_AUTH+x}" ]; then
+  if [ "${BUILD_ALL:-false}" = "true" ]; then
+    BUILD_MODULES="ds-auth ds-user ds-product ds-gateway ds-web"
+  else
+    BUILD_MODULES=""
+    [ "${BUILD_AUTH:-false}"    = "true" ] && BUILD_MODULES="$BUILD_MODULES ds-auth"
+    [ "${BUILD_USER:-false}"    = "true" ] && BUILD_MODULES="$BUILD_MODULES ds-user"
+    [ "${BUILD_PRODUCT:-false}" = "true" ] && BUILD_MODULES="$BUILD_MODULES ds-product"
+    [ "${BUILD_GATEWAY:-false}" = "true" ] && BUILD_MODULES="$BUILD_MODULES ds-gateway"
+    [ "${BUILD_WEB:-false}"     = "true" ] && BUILD_MODULES="$BUILD_MODULES ds-web"
+  fi
+  BUILD_MODULES=$(echo $BUILD_MODULES)
+else
+  # 直接 curl 触发（没传这些参数）时保持旧行为：全部构建
+  BUILD_MODULES="ds-auth ds-user ds-product ds-gateway ds-web"
+fi
+
+# 重启哪些（默认全选；RS_NONE=true 等于全取消）
+if [ "${RS_NONE:-false}" = "true" ]; then
+  RS_MODULES=""
+else
+  RS_MODULES=""
+  [ "${RS_AUTH:-true}"    = "true" ] && RS_MODULES="$RS_MODULES ds-auth"
+  [ "${RS_USER:-true}"    = "true" ] && RS_MODULES="$RS_MODULES ds-user"
+  [ "${RS_PRODUCT:-true}" = "true" ] && RS_MODULES="$RS_MODULES ds-product"
+  [ "${RS_GATEWAY:-true}" = "true" ] && RS_MODULES="$RS_MODULES ds-gateway"
+  [ "${RS_WEB:-true}"     = "true" ] && RS_MODULES="$RS_MODULES ds-web"
+fi
+RS_MODULES=$(echo $RS_MODULES)
+
 # 容器内的 127.0.0.1 是容器自己，kubeconfig 要改成走 kind 网络里的 API Server
 KC=/tmp/kubeconfig
 if [ -f /root/.kube/config ]; then
@@ -35,6 +67,7 @@ echo "===================== 0. 环境 ====================="
 docker version --format 'docker server {{.Server.Version}}'
 kubectl version --client=true | head -2
 echo "TAG=$TAG  REPO=$REPO_URL  REF=$GIT_REF  SRC=$SRC"
+echo "构建模块=[${BUILD_MODULES:-无}]  重启程序=[${RS_MODULES:-无}]"
 
 # 私有仓库支持：有 token 文件就走带凭据的 clone，没有就匿名（public 仓库够用）
 GIT_ENV=()
@@ -79,8 +112,10 @@ BACKEND="$SRC/springainativecode"
 INFRA="$SRC/infra/k8s"
 
 echo "===================== 2. Maven 打包（依赖自动下载到 /root/.m2） ====================="
-if [ "$SKIP_BUILD" != "true" ]; then
-  echo "本地 m2 缓存：$(du -sh "$M2_REPO" 2>/dev/null | cut -f1 || echo 0)"
+# 只有勾了后端模块才需要 Maven；只勾 ds-web（纯静态页）可以整段跳过
+BE_SELECTED=$(echo "$BUILD_MODULES" | tr ' ' '\n' | grep -E '^ds-(auth|user|product|gateway)$' || true)
+if [ "$SKIP_BUILD" != "true" ] && [ -n "$BE_SELECTED" ]; then
+  echo "本地 m2 缓存：$(du -sh /root/.m2/repository 2>/dev/null | cut -f1 || echo 0)"
   docker run --rm \
     -v "$M2_REPO:/root/.m2/repository" \
     -v "$BACKEND:/src" \
@@ -89,30 +124,45 @@ if [ "$SKIP_BUILD" != "true" ]; then
     mvn -B -s .mvn/settings.xml -Dmaven.repo.local=/root/.m2/repository -DskipTests clean package
   ls -lh "$BACKEND"/backend/*/target/*.jar 2>/dev/null || echo "(jar 列表读取失败，看上面 Maven 输出)"
 
-  echo "===================== 3. 构建镜像 ====================="
+  echo "===================== 3. 构建镜像（只构建勾选的模块） ====================="
   cd "$BACKEND"
-  for m in ds-auth ds-user ds-product ds-gateway; do
-    echo "--- $m"
-    docker build -f backend/Dockerfile --build-arg MODULE=$m \
-      -t ${REGISTRY_PUSH}/ds/$m:${TAG} \
-      -t ${REGISTRY_PUSH}/ds/$m:latest backend >/dev/null
+  for m in $BUILD_MODULES; do
+    if [ "$m" = "ds-web" ]; then
+      echo "--- ds-web"
+      docker build -f web/Dockerfile \
+        -t ${REGISTRY_PUSH}/ds/$m:${TAG} \
+        -t ${REGISTRY_PUSH}/ds/$m:latest web >/dev/null
+    else
+      echo "--- $m"
+      docker build -f backend/Dockerfile --build-arg MODULE=$m \
+        -t ${REGISTRY_PUSH}/ds/$m:${TAG} \
+        -t ${REGISTRY_PUSH}/ds/$m:latest backend >/dev/null
+    fi
   done
-  echo "--- ds-web"
-  docker build -f web/Dockerfile \
-    -t ${REGISTRY_PUSH}/ds/ds-web:${TAG} \
-    -t ${REGISTRY_PUSH}/ds/ds-web:latest web >/dev/null
 
-  echo "===================== 4. 推送到私有仓库 ====================="
-  for m in ds-auth ds-user ds-product ds-gateway ds-web; do
+  echo "===================== 4. 推送到私有仓库（只推送勾选的模块） ====================="
+  for m in $BUILD_MODULES; do
     docker push ${REGISTRY_PUSH}/ds/$m:${TAG} >/dev/null
     docker push ${REGISTRY_PUSH}/ds/$m:latest >/dev/null
-    echo "pushed ${REGISTRY_PUSH}/ds/$m:${TAG}"
+    echo "pushed ${REGISTRY_PUSH}/ds/$m:${TAG}  (latest 同步)"
   done
   curl -s --max-time 5 http://${VERIFY_HOST}:5000/v2/_catalog || echo "(catalog 查询超时，不影响发布)"
   echo
+elif [ "$SKIP_BUILD" = "true" ]; then
+  echo "========== 构建阶段：SKIP_BUILD=true，跳过 Maven / 构建 / 推送 =========="
+elif [ -n "$BUILD_MODULES" ]; then
+  echo "========== 构建阶段：勾选的模块里没有后端模块（只勾了 ds-web）；只构建前端镜像 =========="
+  cd "$BACKEND"
+  docker build -f web/Dockerfile \
+    -t ${REGISTRY_PUSH}/ds/ds-web:${TAG} -t ${REGISTRY_PUSH}/ds/ds-web:latest web >/dev/null
+  docker push ${REGISTRY_PUSH}/ds/ds-web:${TAG} >/dev/null
+  docker push ${REGISTRY_PUSH}/ds/ds-web:latest >/dev/null
+  echo "pushed ${REGISTRY_PUSH}/ds/ds-web:${TAG}"
+else
+  echo "========== 构建阶段：没有勾选任何模块，跳过 Maven / 构建 / 推送 =========="
 fi
 
-echo "===================== 5. 发布到 K8s ====================="
+echo "===================== 5. 发布到 K8s（只重启勾选的程序） ====================="
 # 顺序很重要：先 apply 清单（清单里写 :latest），再 set image 到本次唯一 tag。
 # 反过来会被清单覆盖回去，kubelet 还可能命中本地旧镜像。
 kubectl apply -f "$INFRA/namespace.yaml" >/dev/null
@@ -120,13 +170,21 @@ kubectl apply -f "$INFRA/services.yaml" >/dev/null
 kubectl apply -f "$INFRA/web.yaml" >/dev/null
 echo "清单已 apply（image 基线 :latest）"
 
-for m in ds-auth ds-user ds-product ds-gateway ds-web; do
+if [ -z "$RS_MODULES" ]; then
+  echo "本次未勾选任何重启程序：只保留清单，不 set image、不 rollout"
+  kubectl -n ${NS} get deploy
+  echo "DONE tag=$TAG commit=$(git -C "$SRC" rev-parse --short HEAD 2>/dev/null || echo unknown)（无重启）"
+  exit 0
+fi
+
+for m in $RS_MODULES; do
   kubectl -n ${NS} set image deploy/$m $m=${REGISTRY_PULL}/ds/$m:${TAG}
 done
+echo "本次重启：$RS_MODULES"
 # 不要用 `kubectl wait --for=condition=Available`：旧 Pod 仍 Available，会立刻返回成功，
 # 新 Pod 可能还在启动 → 验证阶段打出假 502。rollout status 跟踪的才是本次更新。
 pids=""
-for m in ds-auth ds-user ds-product ds-gateway ds-web; do
+for m in $RS_MODULES; do
   kubectl -n ${NS} rollout status deploy/$m --timeout=900s &
   pids="$pids $!"
 done
