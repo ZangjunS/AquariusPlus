@@ -1,0 +1,146 @@
+# 本地开发：基础设施 + 各服务
+# 用法:
+#   1) docker compose up -d nacos postgres redis rabbitmq
+#   2) 把 sql/init.sql 导入 postgres
+#   3) 在 Nacos 控制台（http://127.0.0.1:8848/nacos, 默认 nacos/nacos）
+#      namespace=dev, 建 dataId: ds-auth / ds-user / ds-product / ds-gateway，
+#      内容参考 sql/nacos-config-example.yml
+#   4) 本地跑各服务: mvn spring-boot:run -pl ds-auth （或 IDE 里直接启动）
+#      或者 docker compose up -d （构建镜像，服务间走容器内网）
+
+version: "3.9"
+
+services:
+  nacos:
+    image: nacos/nacos-server:v2.4.0
+    container_name: ds-nacos
+    environment:
+      MODE: standalone
+      NACOS_AUTH_ENABLE: "true"
+      NACOS_AUTH_TOKEN: "SecretKey012345678901234567890123456789012345678901234567890123456789"
+      NACOS_AUTH_IDENTITY_KEY: nacos
+      NACOS_AUTH_IDENTITY_VALUE: nacos
+    ports:
+      - "8848:8848"
+      - "9848:9848"
+    volumes:
+      - nacos-data:/home/nacos/data
+
+  postgres:
+    image: postgres:16
+    container_name: ds-postgres
+    environment:
+      POSTGRES_DB: ds
+      POSTGRES_USER: ds
+      POSTGRES_PASSWORD: ds123456
+      POSTGRES_INITDB_ARGS: "--auth-host=trust"
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./sql/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ds -d ds"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7
+    container_name: ds-redis
+    ports:
+      - "6379:6379"
+
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    container_name: ds-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: ds
+      RABBITMQ_DEFAULT_PASS: ds123456
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+
+  # 下面是可选的服务容器化；本地开发也可以直接 IDE 跑
+  ds-gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        MODULE: ds-gateway
+    image: ds/ds-gateway:latest
+    container_name: ds-gateway
+    environment:
+      NACOS_ADDR: nacos:8848
+      JAVA_OPTS: "-Xms512m -Xmx512m"
+    ports:
+      - "8080:8080"
+    depends_on:
+      nacos:
+        condition: service_started
+    command: ["sh", "-c", "cd /app && mvn -B -s .mvn/settings.xml -Dmaven.repo.local=/m2 -pl ds-gateway spring-boot:run"]
+
+  ds-auth:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        MODULE: ds-auth
+    image: ds/ds-auth:latest
+    container_name: ds-auth
+    environment:
+      NACOS_ADDR: nacos:8848
+    ports:
+      - "8081:8081"
+    depends_on:
+      nacos:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+    command: ["sh", "-c", "cd /app && mvn -B -s .mvn/settings.xml -Dmaven.repo.local=/m2 -pl ds-auth spring-boot:run"]
+
+  ds-user:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        MODULE: ds-user
+    image: ds/ds-user:latest
+    container_name: ds-user
+    environment:
+      NACOS_ADDR: nacos:8848
+    ports:
+      - "8082:8082"
+    depends_on:
+      nacos:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+    command: ["sh", "-c", "cd /app && mvn -B -s .mvn/settings.xml -Dmaven.repo.local=/m2 -pl ds-user spring-boot:run"]
+
+  ds-product:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        MODULE: ds-product
+    image: ds/ds-product:latest
+    container_name: ds-product
+    environment:
+      NACOS_ADDR: nacos:8848
+    ports:
+      - "8083:8083"
+    depends_on:
+      nacos:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      rabbitmq:
+        condition: service_started
+    command: ["sh", "-c", "cd /app && mvn -B -s .mvn/settings.xml -Dmaven.repo.local=/m2 -pl ds-product spring-boot:run"]
+
+volumes:
+  nacos-data:
+  pgdata:

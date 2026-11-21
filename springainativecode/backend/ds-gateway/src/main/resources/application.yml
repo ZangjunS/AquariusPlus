@@ -1,0 +1,84 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: ds-gateway
+  profiles:
+    active: dev
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_ADDR:127.0.0.1:8848}
+        namespace: dev
+      config:
+        server-addr: ${NACOS_ADDR:127.0.0.1:8848}
+        namespace: dev
+        file-extension: yml
+
+    gateway:
+      discovery:
+        locator:
+          enabled: false   # 不用自动发现；显式路由
+          lower-case-service-id: true
+      routes:
+        - id: ds-auth
+          uri: lb://ds-auth
+          predicates:
+            - Path=/auth/**
+        - id: ds-user
+          uri: lb://ds-user
+          predicates:
+            - Path=/users/**
+        - id: ds-product
+          uri: lb://ds-product
+          predicates:
+            - Path=/products/**
+          filters:
+            - name: CircuitBreaker
+              args:
+                group: product
+                fallbackUri: 'forward:/fallback/product'
+                name: productBreaker
+            - name: Retry
+              args:
+                retries: 2
+                statuses: BAD_GATEWAY, SERVICE_UNAVAILABLE
+
+      httpclient:
+        connect-timeout: 3000
+        response-timeout: 10s
+
+resilience4j:
+  ratelimiter:
+    instances:
+      gateway:
+        limitForPeriod: 100
+        limitRefreshPeriod: 1s
+        timeoutDuration: 0
+
+knife4j:
+  gateway:
+    enabled: true
+    routes:
+      - name: 认证服务
+        service-name: ds-auth
+        url: http://127.0.0.1:8081/v3/api-docs
+      - name: 用户服务
+        service-name: ds-user
+        url: http://127.0.0.1:8082/v3/api-docs
+      - name: 商品服务
+        service-name: ds-product
+        url: http://127.0.0.1:8083/v3/api-docs
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info, gateway
+
+logging:
+  level:
+    org.springframework.cloud.gateway: INFO
+    com.ds: INFO
+

@@ -1,0 +1,116 @@
+# Kubernetes Dashboard（本地 dev 用）
+# 镜像：kubernetesui/dashboard:v2.7.0（kind 节点拉不到 Docker Hub，必须先 docker pull + kind load）
+# 暴露：NodePort 30082 -> https://127.0.0.1:30082（kind-ds.yaml 里已映射 30082）
+# 登录：Token（见 kubectl create token admin-user -n kubernetes-dashboard --duration=24h）
+#       或登录页点 Skip（匿名只读受限，排障够用）
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kubernetes-dashboard
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kubernetes-dashboard
+  namespace: kubernetes-dashboard
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: admin-user
+  namespace: kubernetes-dashboard
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: admin-user
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+  - kind: ServiceAccount
+    name: admin-user
+    namespace: kubernetes-dashboard
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: kubernetes-dashboard-csrf
+  namespace: kubernetes-dashboard
+type: Opaque
+data:
+  csrf: ""
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kubernetes-dashboard
+  namespace: kubernetes-dashboard
+  labels:
+    k8s-app: kubernetes-dashboard
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      k8s-app: kubernetes-dashboard
+  template:
+    metadata:
+      labels:
+        k8s-app: kubernetes-dashboard
+    spec:
+      serviceAccountName: admin-user
+      containers:
+        - name: kubernetes-dashboard
+          image: kubernetesui/dashboard:v2.7.0
+          imagePullPolicy: Never
+          args:
+            - --auto-generate-certificates
+            - --enable-skip-login
+            - --namespace=kubernetes-dashboard
+          ports:
+            - containerPort: 8443
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              scheme: HTTPS
+              path: /
+              port: 8443
+            initialDelaySeconds: 30
+            timeoutSeconds: 30
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsUser: 1001
+            runAsGroup: 2001
+          volumeMounts:
+            - name: kubernetes-dashboard-certs
+              mountPath: /certs
+            - name: tmp-volume
+              mountPath: /tmp
+      volumes:
+        - name: kubernetes-dashboard-certs
+          emptyDir: {}
+        - name: tmp-volume
+          emptyDir: {}
+      nodeSelector:
+        kubernetes.io/os: linux
+      tolerations:
+        - key: node-role.kubernetes.io/master
+          effect: NoSchedule
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kubernetes-dashboard
+  namespace: kubernetes-dashboard
+  labels:
+    k8s-app: kubernetes-dashboard
+spec:
+  type: NodePort
+  ports:
+    - port: 443
+      targetPort: 8443
+      nodePort: 30082
+  selector:
+    k8s-app: kubernetes-dashboard

@@ -1,0 +1,51 @@
+# 各服务共用的 Nacos 配置示例
+# 把这些粘贴到 Nacos 控制台（namespace=dev）里，dataId 与下方 spring.config.import 对应。
+
+# ---------- ds-auth (dataId=ds-auth) ----------
+spring:
+  datasource:
+    url: jdbc:postgresql://postgres:5432/ds?currentSchema=ds&stringtype=unspecified
+    username: ds
+    password: ds123456
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+
+# ---------- ds-user (dataId=ds-user) ----------
+# 同上 spring.datasource
+spring:
+  datasource:
+    url: jdbc:postgresql://postgres:5432/ds?currentSchema=ds&stringtype=unspecified
+    username: ds
+    password: ds123456
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+
+# ---------- ds-product (dataId=ds-product) ----------
+spring:
+  datasource:
+    url: jdbc:postgresql://postgres:5432/ds?currentSchema=ds&stringtype=unspecified
+    username: ds
+    password: ds123456
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+  redis:
+    host: redis
+    port: 6379
+    timeout: 3000
+  rabbitmq:
+    host: rabbitmq
+    port: 5672
+    username: ds
+    password: ds123456
+
+# ---------- ds-gateway (dataId=ds-gateway) ----------
+# 网关不需要数据源；仅日志
+logging:
+  level:
+    root: INFO

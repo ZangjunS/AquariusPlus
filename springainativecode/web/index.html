@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DS 微服务控制台</title>
+<style>
+  :root { --bg:#0f172a; --card:#1e293b; --line:#334155; --txt:#e2e8f0; --dim:#94a3b8; --ok:#22c55e; --bad:#ef4444; --brand:#38bdf8; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.6 system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;
+         background:var(--bg); color:var(--txt); }
+  .wrap { max-width:980px; margin:0 auto; padding:32px 20px 64px; }
+  header { display:flex; align-items:baseline; gap:12px; margin-bottom:8px; flex-wrap:wrap; }
+  h1 { font-size:20px; margin:0; }
+  .sub { color:var(--dim); font-size:13px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:14px; margin:20px 0; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; }
+  .card h2 { margin:0 0 8px; font-size:14px; color:var(--dim); font-weight:600; letter-spacing:.04em; }
+  .card .v { font-size:22px; font-weight:600; }
+  .dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; vertical-align:middle; background:var(--dim); }
+  .ok { color:var(--ok) } .bad { color:var(--bad) }
+  .dot.ok { background:var(--ok) } .dot.bad { background:var(--bad) }
+  table { width:100%; border-collapse:collapse; margin-top:8px; }
+  th,td { text-align:left; padding:10px 12px; border-bottom:1px solid var(--line); font-size:13px; }
+  th { color:var(--dim); font-weight:600; }
+  .btn { display:inline-block; padding:8px 14px; border-radius:8px; border:1px solid var(--line);
+         background:#111c33; color:var(--txt); cursor:pointer; font-size:13px; }
+  .btn:hover { border-color:var(--brand); color:var(--brand); }
+  .btn.primary { background:#0b3b52; border-color:var(--brand); color:var(--brand); }
+  .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:12px; }
+  input { padding:8px 10px; border-radius:8px; border:1px solid var(--line); background:#0b1424; color:var(--txt); width:160px; }
+  .mono { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+  .msg { font-size:12px; color:var(--dim); }
+  .msg.ok { color:var(--ok) } .msg.bad { color:var(--bad) }
+  footer { margin-top:28px; color:var(--dim); font-size:12px; }
+  .sep { height:1px; background:var(--line); margin:24px 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>DS 微服务控制台</h1>
+    <span class="sub">ds-web(nginx) → ds-gateway(8080) → ds-auth / ds-user / ds-product ｜ Kafka 无关，MQ 用 RabbitMQ</span>
+  </header>
+
+  <div class="grid">
+    <div class="card"><h2>网关状态</h2><div class="v"><span class="dot" id="gw-dot"></span><span id="gw-text">检测中</span></div></div>
+    <div class="card"><h2>登录用户</h2><div class="v" style="font-size:16px" id="who">未登录</div></div>
+    <div class="card"><h2>商品总数</h2><div class="v" id="product-count">-</div></div>
+  </div>
+
+  <div class="card">
+    <h2>1) 登录 / 注册（ds-auth）</h2>
+    <div class="row">
+      <input id="u" placeholder="用户名，如 demo" value="demo">
+      <input id="p" placeholder="密码，如 123456" value="123456" type="password">
+      <button class="btn primary" onclick="login()">登录</button>
+      <button class="btn" onclick="register()">注册</button>
+      <button class="btn" onclick="logout()">退出</button>
+      <span class="msg" id="auth-msg"></span>
+    </div>
+  </div>
+
+  <div class="sep"></div>
+
+  <div class="card">
+    <h2>2) 商品列表（经网关 /products，需登录）</h2>
+    <table>
+      <thead><tr><th>ID</th><th>名称</th><th>分类</th><th>价格</th><th>库存</th></tr></thead>
+      <tbody id="rows"><tr><td colspan="5" class="mono">登录后点“刷新”</td></tr></tbody>
+    </table>
+    <div class="row">
+      <button class="btn" onclick="loadProducts()">刷新</button>
+      <button class="btn" onclick="loadUsers()">查询用户 /users/all</button>
+      <span class="msg" id="msg"></span>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:14px">
+    <h2>3) 用户列表（ds-user）</h2>
+    <table>
+      <thead><tr><th>ID</th><th>用户名</th><th>昵称</th><th>角色</th><th>创建时间</th></tr></thead>
+      <tbody id="urows"><tr><td colspan="5" class="mono">未查询</td></tr></tbody>
+    </table>
+  </div>
+
+  <footer>
+    接口前缀 <span class="mono">/api</span> 由 nginx 反代到 <span class="mono">ds-gateway:8080</span>（去掉 /api）；
+    页面由 <span class="mono">ds-web</span>(nginx:alpine) 提供，NodePort <span class="mono">30081</span>；
+    网关 NodePort <span class="mono">30080</span>。
+  </footer>
+</div>
+
+<script>
+const API = '/api';
+const TK = 'ds_token';
+
+const token = () => localStorage.getItem(TK) || '';
+function authHeaders(extra) {
+  const h = Object.assign({'Accept':'application/json'}, extra || {});
+  if (token()) h['Authorization'] = 'Bearer ' + token();
+  return h;
+}
+function setMsg(id, text, cls) {
+  const el = document.getElementById(id);
+  el.className = 'msg ' + (cls || '');
+  el.textContent = text || '';
+}
+
+async function req(path, opts) {
+  const r = await fetch(API + path, opts);
+  const text = await r.text();
+  let body = text;
+  try { body = JSON.parse(text); } catch {}
+  return { status: r.status, ok: r.ok, body };
+}
+
+/* ---------- 健康/状态 ---------- */
+async function gwStatus() {
+  const dot = document.getElementById('gw-dot'), t = document.getElementById('gw-text');
+  try {
+    const r = await fetch(API + '/actuator/health');
+    const ok = r.ok;
+    dot.className = 'dot ' + (ok ? 'ok' : 'bad');
+    t.className = ok ? 'ok' : 'bad';
+    t.textContent = ok ? '在线' : ('HTTP ' + r.status);
+  } catch (e) {
+    dot.className = 'dot bad'; t.className = 'bad'; t.textContent = '不可达';
+  }
+}
+
+/* ---------- 登录 ---------- */
+async function login() {
+  const username = document.getElementById('u').value.trim();
+  const password = document.getElementById('p').value;
+  const r = await req('/auth/login', {
+    method:'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({username, password})
+  });
+  if (r.ok && r.body && r.body.code === 0 && r.body.data && r.body.data.token) {
+    localStorage.setItem(TK, r.body.data.token);
+    setMsg('auth-msg', '登录成功', 'ok');
+    setWho();
+    loadProducts();
+  } else {
+    setMsg('auth-msg', '登录失败：' + (r.body?.message || ('HTTP ' + r.status)), 'bad');
+  }
+}
+
+async function register() {
+  const username = document.getElementById('u').value.trim();
+  const password = document.getElementById('p').value;
+  const r = await req('/auth/register', {
+    method:'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({username, password, nickname: username})
+  });
+  if (r.ok && r.body && r.body.code === 0) {
+    if (r.body.data && r.body.data.token) {
+      localStorage.setItem(TK, r.body.data.token);
+      setWho(); loadProducts();
+    }
+    setMsg('auth-msg', '注册成功（已自动登录）', 'ok');
+  } else {
+    setMsg('auth-msg', '注册失败：' + (r.body?.message || ('HTTP ' + r.status)), 'bad');
+  }
+}
+
+function logout() {
+  localStorage.removeItem(TK);
+  setWho();
+  document.getElementById('rows').innerHTML = '<tr><td colspan="5" class="mono">已退出，请重新登录</td></tr>';
+  document.getElementById('urows').innerHTML = '<tr><td colspan="5" class="mono">未查询</td></tr>';
+  document.getElementById('product-count').textContent = '-';
+  setMsg('auth-msg', '已退出', '');
+}
+
+function setWho() {
+  const t = token();
+  const who = document.getElementById('who');
+  if (!t) { who.textContent = '未登录'; return; }
+  try {
+    const payload = JSON.parse(decodeURIComponent(escape(atob(t.split('.')[1].replace(/-/g,'+').replace(/_/g,'/')))));
+    who.textContent = (payload.username || '?') + ' / ' + (payload.role || 'USER');
+  } catch { who.textContent = '已登录'; }
+}
+
+/* ---------- 商品 ---------- */
+async function loadProducts() {
+  const rows = document.getElementById('rows');
+  if (!token()) {
+    rows.innerHTML = '<tr><td colspan="5" class="bad mono">需要登录（上方先登录）</td></tr>';
+    return;
+  }
+  const r = await req('/products', { headers: authHeaders() });
+  if (!r.ok || !r.body || r.body.code !== 0) {
+    rows.innerHTML = `<tr><td colspan="5" class="bad mono">失败：HTTP ${r.status} ${(r.body?.message||'')}</td></tr>`;
+    setMsg('msg', 'products 读取失败', 'bad');
+    return;
+  }
+  const page = r.body.data || {};
+  const list = page.records || [];
+  document.getElementById('product-count').textContent = page.total ?? list.length;
+  if (!list.length) {
+    rows.innerHTML = '<tr><td colspan="5" class="mono">暂无数据（t_product 表为空）</td></tr>';
+  } else {
+    rows.innerHTML = list.map(p => `<tr>
+      <td class="mono">${p.id ?? '-'}</td><td>${p.name ?? '-'}</td><td>${p.category ?? '-'}</td>
+      <td>${p.price ?? '-'}</td><td>${p.stock ?? '-'}</td></tr>`).join('');
+  }
+  setMsg('msg', 'products 200 OK', 'ok');
+}
+
+async function loadUsers() {
+  const urows = document.getElementById('urows');
+  if (!token()) { urows.innerHTML = '<tr><td colspan="5" class="bad mono">需要登录</td></tr>'; return; }
+  const r = await req('/users/all', { headers: authHeaders() });
+  if (!r.ok || !r.body || r.body.code !== 0) {
+    urows.innerHTML = `<tr><td colspan="5" class="bad mono">失败：HTTP ${r.status} ${(r.body?.message||'')}</td></tr>`;
+    return;
+  }
+  const list = r.body.data || [];
+  urows.innerHTML = list.length ? list.map(u => `<tr>
+      <td class="mono">${u.id ?? '-'}</td><td>${u.username ?? '-'}</td><td>${u.nickname ?? '-'}</td>
+      <td>${u.role ?? '-'}</td><td class="mono">${(u.createTime||'').toString().replace('T',' ').slice(0,19)}</td></tr>`).join('')
+    : '<tr><td colspan="5" class="mono">无用户</td></tr>';
+}
+
+/* ---------- init ---------- */
+gwStatus();
+setWho();
+if (token()) loadProducts();
+setInterval(gwStatus, 15000);
+</script>
+</body>
+</html>

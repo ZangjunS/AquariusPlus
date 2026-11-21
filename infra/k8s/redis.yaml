@@ -1,0 +1,39 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: ds
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      imagePullSecrets:
+        - name: harbor-creds
+      containers:
+        - name: redis
+          image: 172.17.1.1:5000/ds/redis:7
+          ports:
+            - containerPort: 6379
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits:   { cpu: 200m, memory: 256Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: ds
+spec:
+  selector:
+    app: redis
+  ports:
+    - name: redis
+      port: 6379
+
+

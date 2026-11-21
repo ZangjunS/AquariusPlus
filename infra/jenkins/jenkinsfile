@@ -1,0 +1,136 @@
+// DS 微服务 CI/CD：Maven 构建 → 私有仓库推送 → K8s 滚动发布 → 健康验证
+// Jenkins 容器与宿主 docker daemon 共享 socket，仓库目录在容器内挂到与宿主完全相同的绝对路径，
+// 因此 docker build 的上下文路径对宿主 daemon 可见。
+// 注意：镜像必须使用唯一 tag（默认 build-<构建号>），否则 kubelet 会复用本地旧镜像。
+
+pipeline {
+    agent any
+
+    parameters {
+        string(name: 'TAG', defaultValue: '', description: '镜像 tag；留空自动用 build-<构建号>')
+        booleanParam(name: 'SKIP_BUILD', defaultValue: false, description: '跳过 Maven 打包，直接用已有 jar')
+        booleanParam(name: 'SKIP_DEPLOY', defaultValue: false, description: '只构建推送，不发布到 K8s')
+    }
+
+    environment {
+        REGISTRY_PUSH = '127.0.0.1:5000'          // 宿主侧地址（docker push 走宿主 daemon）
+        REGISTRY_PULL = '172.17.1.1:5000'          // kind 节点侧地址（kubelet 拉镜像用）
+        REPO          = '/mnt/d/000/dev/code/item/zangs/springclould/ds/springainativecode'
+        M2            = '/mnt/d/dev/envi/maven/.m2/repository'
+        K8S_NS        = 'ds'
+    }
+
+    stages {
+
+        stage('环境检查') {
+            steps {
+                sh '''
+                    set -e
+                    echo "构建号: ${BUILD_NUMBER}  节点: $(hostname)"
+                    docker version --format 'docker {{.Server.Version}}' || { echo "docker 不可用"; exit 1; }
+                    kubectl version --client=true 2>/dev/null | head -2
+                    kubectl -n ds get deploy || true
+                '''
+            }
+        }
+
+        stage('准备 tag') {
+            steps {
+                script {
+                    def auto = "build-${env.BUILD_NUMBER}"
+                    env.TAG_FINAL = (params.TAG?.trim()) ? params.TAG.trim() : auto
+                    echo "本次镜像 tag = ${env.TAG_FINAL}"
+                }
+            }
+        }
+
+        stage('Maven 打包') {
+            when { expression { return !params.SKIP_BUILD } }
+            steps {
+                sh '''
+                    set -e
+                    docker run --rm \
+                      -v "${M2}:/root/.m2/repository" \
+                      -v "${REPO}:/src" \
+                      -w /src/backend \
+                      maven:3.9-eclipse-temurin-17 \
+                      mvn -B -s .mvn/settings.xml -Dmaven.repo.local=/root/.m2/repository -DskipTests clean package
+                '''
+            }
+        }
+
+        stage('构建镜像') {
+            steps {
+                sh '''
+                    set -e
+                    cd "${REPO}"
+                    for m in ds-auth ds-user ds-product ds-gateway; do
+                      docker build -f backend/Dockerfile --build-arg MODULE=$m \
+                        -t ${REGISTRY_PUSH}/ds/$m:${TAG_FINAL} \
+                        -t ${REGISTRY_PUSH}/ds/$m:latest backend
+                    done
+                    docker build -f web/Dockerfile \
+                      -t ${REGISTRY_PUSH}/ds/ds-web:${TAG_FINAL} \
+                      -t ${REGISTRY_PUSH}/ds/ds-web:latest web
+                    docker images | grep "${REGISTRY_PUSH}/ds/"
+                '''
+            }
+        }
+
+        stage('推送到私有仓库') {
+            steps {
+                sh '''
+                    set -e
+                    for m in ds-auth ds-user ds-product ds-gateway ds-web; do
+                      docker push ${REGISTRY_PUSH}/ds/$m:${TAG_FINAL}
+                      docker push ${REGISTRY_PUSH}/ds/$m:latest
+                    done
+                    echo "仓库 catalog: "
+                    curl -s http://${REGISTRY_PUSH}/v2/_catalog
+                '''
+            }
+        }
+
+        stage('发布到 K8s') {
+            when { expression { return !params.SKIP_DEPLOY } }
+            steps {
+                sh '''
+                    set -e
+                    # 唯一 tag => 必然触发滚动更新；节点侧用 172.17.1.1:5000 拉取
+                    for m in ds-auth ds-user ds-product ds-gateway ds-web; do
+                      kubectl -n ${K8S_NS} set image deploy/$m \
+                        $m=${REGISTRY_PULL}/ds/$m:${TAG_FINAL} || true
+                    done
+                    for m in ds-auth ds-user ds-product ds-gateway ds-web; do
+                      kubectl -n ${K8S_NS} rollout status deploy/$m --timeout=300s
+                    done
+                    kubectl -n ${K8S_NS} get pods
+                '''
+            }
+        }
+
+        stage('访问验证') {
+            when { expression { return !params.SKIP_DEPLOY } }
+            steps {
+                sh '''
+                    set -e
+                    echo "网关健康:   $(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:30080/actuator/health)"
+                    echo "前端页面:   $(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:30081/)"
+                    echo "无 token /products: $(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:30080/products) （期望 401）"
+                    TOKEN=$(curl -s -X POST -H 'Content-Type: application/json' \
+                      -d '{"username":"demo","password":"123456"}' \
+                      http://127.0.0.1:30080/auth/login | sed -n 's/.*"token":"([^"]*)".*/\\1/p')
+                    if [ -n "$TOKEN" ]; then
+                      echo "带 token /products: $(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $TOKEN" http://127.0.0.1:30080/products)"
+                    fi
+                '''
+            }
+        }
+    }
+
+    post {
+        success { echo "全链路完成：构建 → 推送 → 部署 → 可访问，tag=${env.TAG_FINAL}" }
+        failure { echo "流水线失败，请查看对应 stage 日志" }
+        always  { sh 'kubectl -n ds get pods 2>/dev/null || true' }
+    }
+}

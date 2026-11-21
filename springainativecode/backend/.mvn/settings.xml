@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<settings xmlns="http://maven.apache.org/SETTINGS/1.0.0"
+          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.0.0 https://maven.apache.org/xsd/settings-1.0.0.xsd">
+  <localRepository>D:\dev\envi\maven\.m2\repository</localRepository>
+
+  <!--
+    镜像策略：
+      - 只把 central 镜像到阿里公共仓库（速度快、覆盖全）
+      - 不在 settings 里声明 alibaba-sca 仓库
+        因为 spring-cloud-alibaba 的构件本身已发布到 Maven Central，
+        通过 central（aliyun 公共仓库）就能拉到。
+  -->
+  <mirrors>
+    <mirror>
+      <id>aliyun-central</id>
+      <mirrorOf>central</mirrorOf>
+      <name>Aliyun Central</name>
+      <url>https://maven.aliyun.com/repository/public</url>
+    </mirror>
+  </mirrors>
+</settings>

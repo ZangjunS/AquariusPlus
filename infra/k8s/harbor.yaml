@@ -1,0 +1,76 @@
+# Harbor 私有镜像仓库
+# 简化版：用 docker-registry + 单独鉴权容器（生产建议用完整 Harbor）
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: harbor-data
+  namespace: ds
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: harbor
+  namespace: ds
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: harbor
+  template:
+    metadata:
+      labels:
+        app: harbor
+    spec:
+      containers:
+        - name: harbor
+          # 完整 Harbor 镜像
+          image: harbor/harbor:2.10.0
+          env:
+            - name: HARBOR_ADMIN_PASSWORD
+              value: "Harbor12345"
+            - name: HARBOR_DB_HOST
+              value: postgres.ds.svc
+            - name: HARBOR_DB_PORT
+              value: "5432"
+            - name: HARBOR_DB_USER
+              value: ds
+            - name: HARBOR_DB_PASSWORD
+              value: ds123456
+            - name: HARBOR_DB_DATABASE
+              value: ds
+            - name: HARBOR_REGISTRY_URL
+              value: http://harbor.ds.svc:80
+          ports:
+            - containerPort: 80
+              name: http
+          volumeMounts:
+            - name: data
+              mountPath: /storage
+          resources:
+            requests: { cpu: 200m, memory: 512Mi }
+            limits:   { cpu: "1", memory: 2Gi }
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: harbor-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: harbor
+  namespace: ds
+spec:
+  type: NodePort
+  selector:
+    app: harbor
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80
+      nodePort: 30082

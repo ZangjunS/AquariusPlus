@@ -1,0 +1,202 @@
+# 一键起全部：后端服务 + Harbor + Jenkins + Kind 集群（可选）
+# 用法:
+#   docker compose up -d                    # 起基础设施 + 4 服务
+#   docker compose up -d jenkins            # 额外起 Jenkins
+#   docker compose up -d harbor             # 额外起 Harbor（替代 K8s 里的 Harbor）
+
+version: "3.9"
+
+services:
+  nacos:
+    image: nacos/nacos-server:v2.4.0
+    container_name: ds-nacos
+    environment:
+      MODE: standalone
+      NACOS_AUTH_ENABLE: "true"
+      NACOS_AUTH_TOKEN: "SecretKey012345678901234567890123456789012345678901234567890123456789"
+      NACOS_AUTH_IDENTITY_KEY: nacos
+      NACOS_AUTH_IDENTITY_VALUE: nacos
+    ports:
+      - "8848:8848"
+      - "9848:9848"
+    volumes:
+      - nacos-data:/home/nacos/data
+
+  postgres:
+    image: postgres:16
+    container_name: ds-postgres
+    environment:
+      POSTGRES_DB: ds
+      POSTGRES_USER: ds
+      POSTGRES_PASSWORD: ds123456
+      POSTGRES_INITDB_ARGS: "--auth-host=trust"
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./springainativecode/backend/sql/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ds -d ds"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7
+    container_name: ds-redis
+    ports:
+      - "6379:6379"
+
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    container_name: ds-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: ds
+      RABBITMQ_DEFAULT_PASS: ds123456
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+
+  # ===== 后端服务（容器化跑）=====
+  ds-gateway:
+    build:
+      context: ./springainativecode/backend
+      dockerfile: Dockerfile
+      args:
+        MODULE: ds-gateway
+    image: ds/ds-gateway:dev
+    container_name: ds-gateway
+    environment:
+      NACOS_ADDR: nacos:8848
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/ds?currentSchema=ds&stringtype=unspecified
+      SPRING_DATASOURCE_USERNAME: ds
+      SPRING_DATASOURCE_PASSWORD: ds123456
+      SPRING_REDIS_HOST: redis
+      SPRING_RABBITMQ_HOST: rabbitmq
+    ports:
+      - "8080:8080"
+    depends_on:
+      nacos:
+        condition: service_started
+    command: ["sh", "-c", "cd /app && mvn -B -s .mvn/settings.xml -Dmaven.repo.local=/m2 -pl ds-gateway spring-boot:run"]
+
+  ds-auth:
+    build:
+      context: ./springainativecode/backend
+      dockerfile: Dockerfile
+      args:
+        MODULE: ds-auth
+    image: ds/ds-auth:dev
+    container_name: ds-auth
+    environment:
+      NACOS_ADDR: nacos:8848
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/ds?currentSchema=ds&stringtype=unspecified
+      SPRING_DATASOURCE_USERNAME: ds
+      SPRING_DATASOURCE_PASSWORD: ds123456
+    ports:
+      - "8081:8081"
+    depends_on:
+      nacos:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+    command: ["sh", "-c", "cd /app && mvn -B -s .mvn/settings.xml -Dmaven.repo.local=/m2 -pl ds-auth spring-boot:run"]
+
+  ds-user:
+    build:
+      context: ./springainativecode/backend
+      dockerfile: Dockerfile
+      args:
+        MODULE: ds-user
+    image: ds/ds-user:dev
+    container_name: ds-user
+    environment:
+      NACOS_ADDR: nacos:8848
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/ds?currentSchema=ds&stringtype=unspecified
+      SPRING_DATASOURCE_USERNAME: ds
+      SPRING_DATASOURCE_PASSWORD: ds123456
+    ports:
+      - "8082:8082"
+    depends_on:
+      nacos:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+    command: ["sh", "-c", "cd /app && mvn -B -s .mvn/settings.xml -Dmaven.repo.local=/m2 -pl ds-user spring-boot:run"]
+
+  ds-product:
+    build:
+      context: ./springainativecode/backend
+      dockerfile: Dockerfile
+      args:
+        MODULE: ds-product
+    image: ds/ds-product:dev
+    container_name: ds-product
+    environment:
+      NACOS_ADDR: nacos:8848
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/ds?currentSchema=ds&stringtype=unspecified
+      SPRING_DATASOURCE_USERNAME: ds
+      SPRING_DATASOURCE_PASSWORD: ds123456
+      SPRING_REDIS_HOST: redis
+      SPRING_RABBITMQ_HOST: rabbitmq
+      SPRING_RABBITMQ_USERNAME: ds
+      SPRING_RABBITMQ_PASSWORD: ds123456
+    ports:
+      - "8083:8083"
+    depends_on:
+      nacos:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      rabbitmq:
+        condition: service_started
+    command: ["sh", "-c", "cd /app && mvn -B -s .mvn/settings.xml -Dmaven.repo.local=/m2 -pl ds-product spring-boot:run"]
+
+  # ===== 前端 =====
+  ds-web:
+    build:
+      context: ./springainativecode/web
+      dockerfile: Dockerfile
+    image: ds/ds-web:dev
+    container_name: ds-web
+    ports:
+      - "80:80"
+    depends_on:
+      - ds-gateway
+
+  # ===== Harbor 私有仓库（可选，K8s 里也有一份）=====
+  harbor:
+    image: harbor/harbor:2.10.0
+    container_name: ds-harbor
+    environment:
+      HARBOR_ADMIN_PASSWORD: "Harbor12345"
+    ports:
+      - "30082:80"
+    volumes:
+      - harbor-data:/storage
+    restart: unless-stopped
+
+  # ===== Jenkins（可选）=====
+  jenkins:
+    image: jenkins/jenkins:2.440.3-lts-jdk17
+    container_name: ds-jenkins
+    privileged: true
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock   # 让 Jenkins 用宿主机 Docker
+      - jenkins-home:/var/jenkins_home
+      - ./infra/jenkins:/opt/jenkins/scripts:ro
+      - /usr/local/bin/kubectl:/usr/local/bin/kubectl:ro
+    environment:
+      JENKINS_INSTANCE_HOST: jenkins
+    ports:
+      - "8090:8080"
+      - "50000:50000"
+    restart: unless-stopped
+
+volumes:
+  nacos-data:
+  pgdata:
+  harbor-data:
+  jenkins-home:

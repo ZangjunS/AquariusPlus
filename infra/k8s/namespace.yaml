@@ -1,0 +1,30 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ds
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: harbor-creds
+  namespace: ds
+type: kubernetes.io/dockerconfigjson
+stringData:
+  .dockerconfigjson: |
+    {
+      "auths": {
+        "harbor.ds.svc:80": {
+          "username": "admin",
+          "password": "Harbor12345",
+          "auth": "YWRtaW46SGFyYm9yMTIzNDU="
+        }
+      }
+    }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: image-pull-secret
+  namespace: ds
+data:
+  secret-name: harbor-creds

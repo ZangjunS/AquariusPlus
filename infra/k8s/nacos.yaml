@@ -1,0 +1,79 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nacos-config
+  namespace: ds
+data:
+  application.properties: |
+    # Nacos 集群配置（kind 里跑 standalone + 内置 derby 存储即可）
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nacos
+  namespace: ds
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nacos
+  template:
+    metadata:
+      labels:
+        app: nacos
+    spec:
+      containers:
+        - name: nacos
+          image: 172.17.1.1:5000/ds/nacos:v2.4.0
+          env:
+            - name: MODE
+              value: standalone
+            # dev 环境关掉鉴权，避免还要配 username/password/token
+            - name: NACOS_AUTH_ENABLE
+              value: "false"
+            - name: JVM_XMS
+              value: "256m"
+            - name: JVM_XMX
+              value: "512m"
+            - name: JVM_XMN
+              value: "128m"
+            # 不指定 SPRING_DATASOURCE_PLATFORM，走内置 derby，省掉建库建表
+          ports:
+            - containerPort: 8848
+              name: http
+            - containerPort: 9848
+              name: client-rpc
+          resources:
+            requests:
+              cpu: 200m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          readinessProbe:
+            tcpSocket:
+              port: 8848
+            initialDelaySeconds: 45
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 8848
+            initialDelaySeconds: 120
+            periodSeconds: 20
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nacos
+  namespace: ds
+spec:
+  selector:
+    app: nacos
+  ports:
+    - name: http
+      port: 8848
+      targetPort: 8848
+    - name: client-rpc
+      port: 9848
+      targetPort: 9848
+

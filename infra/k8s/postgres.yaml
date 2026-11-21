@@ -1,0 +1,106 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-data
+  namespace: ds
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: ds
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      imagePullSecrets:
+        - name: harbor-creds
+      containers:
+        - name: postgres
+          image: 172.17.1.1:5000/ds/postgres:16
+          env:
+            - name: POSTGRES_DB
+              value: ds
+            - name: POSTGRES_USER
+              value: ds
+            - name: POSTGRES_PASSWORD
+              value: ds123456
+            - name: POSTGRES_INITDB_ARGS
+              value: "--auth-host=trust"
+          ports:
+            - containerPort: 5432
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: init
+              mountPath: /docker-entrypoint-initdb.d
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: postgres-data
+        - name: init
+          configMap:
+            name: postgres-init
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-init
+  namespace: ds
+data:
+  01-init.sql: |
+    SET client_min_messages = NOTICE;
+    CREATE SCHEMA IF NOT EXISTS ds;
+    SET search_path TO ds, public;
+    CREATE TABLE IF NOT EXISTS t_user (
+        id          BIGSERIAL PRIMARY KEY,
+        username    VARCHAR(64) NOT NULL UNIQUE,
+        password    VARCHAR(128) NOT NULL,
+        nickname    VARCHAR(64),
+        role        VARCHAR(16) NOT NULL DEFAULT 'USER',
+        create_time TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        update_time TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS t_product (
+        id          BIGSERIAL PRIMARY KEY,
+        name        VARCHAR(128) NOT NULL,
+        category    VARCHAR(64),
+        price       NUMERIC(12,2) NOT NULL DEFAULT 0,
+        stock       INTEGER NOT NULL DEFAULT 0,
+        description VARCHAR(512),
+        create_time TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        update_time TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: ds
+spec:
+  selector:
+    app: postgres
+  ports:
+    - name: postgres
+      port: 5432
+
+
